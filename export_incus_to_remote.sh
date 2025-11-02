@@ -139,11 +139,11 @@ else
   exit 1
 fi
 
-read -rp "move done"
+read -rp "move done: Pausing for human checks"
 
 if ln -s $BACKUP_LOCAL_TEMP_DIR $INCUS_DEFAULT_BACKUP_DIR; then
   print_v d "softlink creation ok"
-  read -pr "softlink done"
+  read -rp "softlink done"
 else
   print_v e "failure in creation of softlink undoing mv"
   if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
