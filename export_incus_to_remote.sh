@@ -42,7 +42,7 @@ LOG_FILE="/tmp/last_incus_export.txt"
 #SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 SCRIPT_DIR=$(dirname "$0")
 if ! source "$SCRIPT_DIR/export_incus_to_remote.env"; then
-  echo "Can not find .env file"
+  print_v e "Can not find .env file"
   exit 1
 fi
 
@@ -51,7 +51,7 @@ INCUS_BACKUP_PATH=$(realpath $INCUS_DEFAULT_BACKUP_DIR)
 
 
 if [[ $NFS_SERVER == "TOSET" ]]; then
-  echo "See .env file and set variables"
+  print_v e "See .env file and set variables"
   exit 1
 elif [[ $DEBUG == 1 ]]; then
   print_v d "ADMIN=$ADMIN"
@@ -78,6 +78,31 @@ function is_incus_export_running() {
       return 1
     fi
   done
+}
+
+function restore_incus_backups_dir() {
+  #at end of this unmount NFS dir and set all back
+  if is_incus_export_running; then
+    print_v w "Export still running? It shouldn't be at this point."
+    sleep 5
+  fi
+  if is_incus_export_running; then
+    print_v w "Export still running? It shouldn't be at this point."
+    read -rp "pausing for human intervention"
+    exit 1
+  fi
+  # remove link to backup NFS dir
+  if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
+    print_v d "Removing softlink"
+    rm $INCUS_DEFAULT_BACKUP_DIR;
+  else
+    print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
+    exit 1
+  fi
+  # Restoring old link or dir for incus
+  if [ ! -e $INCUS_DEFAULT_BACKUP_DIR ]; then
+    mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
+  fi
 }
 
 # Root needed for a few operations.
@@ -149,7 +174,7 @@ END=2
 TERM=$((END+1))
 
 
-#echo $ROOT_DIR
+#print_v e $ROOT_DIR
 #exit
 
 #check to make sure this is a location that is ok.
@@ -165,13 +190,38 @@ fi
 
 #for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
 for INSTANCE in $(incus list name=EXAMPLE -c n -f csv); do
-  print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-  if incus export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.tgz" ; then
+
+  #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
+  for i in $(seq $END -1 0); do
+    if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
+      NEXT=$((i+1))
+      mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+    fi
+  done
+  if [ -d "$ROOT_DIR/$INSTANCE.$TERM" ]; then
+    rm -r "$ROOT_DIR/$INSTANCE.$TERM"
+  fi
+
+  #Check if .0 directory exists and if not create it
+  if [ ! -d "/$ROOT_DIR/$INSTANCE.0" ] ; then
+    print_v d "CREATING $ROOT_DIR/$INSTANCE.0"
+    if ! mkdir -p "$ROOT_DIR/$INSTANCE.0"; then
+      print_v e "Creating directory failed: $HOSTNAME"
+      restore_incus_backups_dir
+      exit 1
+    fi
+  fi
+
+  print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
+  if incus export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
     print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
   else
     print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
+    restore_incus_backups_dir
     exit 1
   fi
+
+
 done
 print_v i "Success: $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
 mail -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
@@ -180,24 +230,8 @@ mail -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT/ backup_user@backup_server.example.com:~/server2/$OBJECT/
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT backup_user@backup_server.example.com:~/server2/
 
-#at end of this unmount NFS dir and set all back
-if is_incus_export_running; then
-  print_v w "Export still running? It shouldn't be."
-  read -rp "pausing for human intervention"
-  exit 1
-fi
-# remove link to backup NFS dir
-if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
-  print_v d "Removing softlink"
-  rm $INCUS_DEFAULT_BACKUP_DIR;
-else
-  print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
-  exit 1
-fi
-# Restoring old link or dir for incus
-if [ ! -e $INCUS_DEFAULT_BACKUP_DIR ]; then
-  mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
-fi
+restore_incus_backups_dir
+
 umount "$BACKUP_LOCAL_ROOT_DIR"
 print_v d "Finished with export"
 exit 0
