@@ -1,0 +1,204 @@
+#!/bin/bash
+# vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
+
+DEBUG=1
+INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
+
+#
+# #Functions:
+# Output: Formatted Message String
+# Return: 0 on success, non 0 otherwise
+function print_v() {
+  local level=$1
+  THIS_DATE=$(date --iso-8601=seconds)
+
+  case $level in
+    d) # Debug
+    echo -e "$THIS_DATE [DBUG] ${*:2}"
+    ;;
+    e) # Error
+    echo -e "$THIS_DATE [ERRS] ${*:2}"
+    ;;
+    w) # Warning
+    echo -e "$THIS_DATE [WARN] ${*:2}"
+    ;;
+    *) # Any other level
+    echo -e "$THIS_DATE [INFO] ${*:2}"
+    ;;
+  esac
+}
+
+#Variables
+HOSTNAME=$(hostname)
+ADMIN="monitoring@example.com"
+NFS_SERVER="TOSET"
+BACKUP_LOCAL_ROOT_DIR="TOSET"
+#Do not have NFS_REMOTE_ROOT_DIR end with a "/"
+NFS_REMOTE_ROOT_DIR="/path/TOSET/$HOSTNAME"
+BACKUP_LOCAL_TEMP_DIR="$BACKUP_LOCAL_ROOT_DIR/temp_backups/backups/"
+
+LOG_FILE="/tmp/last_incus_export.txt"
+
+#SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+SCRIPT_DIR=$(dirname "$0")
+if ! source "$SCRIPT_DIR/export_incus_to_remote.env"; then
+  echo "Can not find .env file"
+  exit 1
+fi
+
+#get the actual backup location
+INCUS_BACKUP_PATH=$(realpath $INCUS_DEFAULT_BACKUP_DIR)
+
+
+if [[ $NFS_SERVER == "TOSET" ]]; then
+  echo "See .env file and set variables"
+  exit 1
+elif [[ $DEBUG == 1 ]]; then
+  print_v d "ADMIN=$ADMIN"
+  print_v d "NFS_SERVER=$NFS_SERVER"
+  print_v d "BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
+  print_v d "NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
+fi
+
+#Return 0 (true) if is running, Return 1 (false) if not running
+function is_incus_export_running() {
+  if ! INCUSD_PID=$(pgrep -f incusd); then
+    print_v e "Can't find incusd process_id. Exiting"
+    pgrep -f incusd
+    exit 1
+  fi
+
+  #There should be only one PID, but let's not assume
+  for PID in $INCUSD_PID; do
+    print_v d "INCUS_PID=$PID"
+    if lsof -p "$PID" | grep "$INCUS_BACKUP_PATH"; then
+      return 0
+    else
+      print_v d "INCUS_PID=$PID: No Backup Running"
+      return 1
+    fi
+  done
+}
+
+# Root needed for a few operations.
+if [[ $EUID -ne 0 ]]; then
+   print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
+   exit 1
+fi
+
+if is_incus_export_running; then
+  print_v e "Do not run this script while an export is already running. Exiting."
+  exit 1
+else
+  print_v d "No other export is running."
+fi
+
+#check to make sure this is a network mounted location
+if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
+  print_v d "Not a mountpoint, mounting" | tee -a "$LOG_FILE"
+  mount -t nfs4 "$NFS_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
+fi
+
+#did that mount succeed? One more test.
+if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
+  print_v e  "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"| tee -a "$LOG_FILE"
+  mail $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"  < "$LOG_FILE"
+  exit 1
+fi
+
+#move incus directory or softlink to backup location
+if [ ! -e /var/lib/incus/backups.bak ] && mv $INCUS_DEFAULT_BACKUP_DIR /var/lib/incus/backups.bak; then
+  print_v d "move of backups dir $INCUS_DEFAULT_BACKUP_DIR link ok"
+else
+  print_v e "failure in moving backups dir to /var/lib/incus/backups.bak"
+  exit 1
+fi
+
+read -rp "move done"
+
+if ln -s $BACKUP_LOCAL_TEMP_DIR $INCUS_DEFAULT_BACKUP_DIR; then
+  print_v d "softlink creation ok"
+  read -pr "softlink done"
+else
+  print_v e "failure in creation of softlink undoing mv"
+  if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
+    print_v d "Removing softlink"
+    rm $INCUS_DEFAULT_BACKUP_DIR;
+  else
+    print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
+    exit 1
+  fi
+  if [ -e /var/lib/incus/backups.bak ]; then
+    mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
+  else
+    print_v e "Can't move /var/lib/incus/backups.bak back to $INCUS_DEFAULT_BACKUP_DIR"
+  fi
+    exit 1
+fi
+
+
+print_v d "TODO: check for disk percent full vs size of predicted export"
+print_v d "TODO: have #s of backups"
+
+print_v i "Starting Incus Exports $(date)"  > "$LOG_FILE"
+
+ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
+
+#How many full exports to keep
+END=2
+TERM=$((END+1))
+
+
+#echo $ROOT_DIR
+#exit
+
+#check to make sure this is a location that is ok.
+if [ ! -d "$ROOT_DIR" ]; then
+  if ! mkdir -p "$ROOT_DIR"; then
+    print_v e "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
+    mail $ADMIN -s "$HOSTNAME: NFS connect to $NFS_SERVER failed" < /etc/cron.d/backups
+    exit 1
+  fi
+fi
+
+#mail $ADMIN -s "backup starting" < /etc/cron.d/backups
+
+#for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
+for INSTANCE in $(incus list name=EXAMPLE -c n -f csv); do
+  print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
+  if incus export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.tgz" ; then
+    print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
+  else
+    print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
+    exit 1
+  fi
+done
+print_v i "Success: $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
+mail -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
+
+#need to have ssh key-pair setup to get rsync-via-ssh to be enabled, note trailing / is very important
+#rsync -n -i -e ssh  -av  /srv/backups/$OBJECT/ backup_user@backup_server.example.com:~/server2/$OBJECT/
+#rsync -n -i -e ssh  -av  /srv/backups/$OBJECT backup_user@backup_server.example.com:~/server2/
+
+#at end of this unmount NFS dir and set all back
+if is_incus_export_running; then
+  print_v w "Export still running? It shouldn't be."
+  read -rp "pausing for human intervention"
+  exit 1
+fi
+# remove link to backup NFS dir
+if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
+  print_v d "Removing softlink"
+  rm $INCUS_DEFAULT_BACKUP_DIR;
+else
+  print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
+  exit 1
+fi
+# Restoring old link or dir for incus
+if [ ! -e $INCUS_DEFAULT_BACKUP_DIR ]; then
+  mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
+fi
+umount "$BACKUP_LOCAL_ROOT_DIR"
+print_v d "Finished with export"
+exit 0
+
