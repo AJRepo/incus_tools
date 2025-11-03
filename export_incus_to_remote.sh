@@ -139,11 +139,11 @@ else
   exit 1
 fi
 
-read -rp "move done: Pausing for human checks"
+#read -rp "move done: Pausing for human checks"
 
 if ln -s $BACKUP_LOCAL_TEMP_DIR $INCUS_DEFAULT_BACKUP_DIR; then
   print_v d "softlink creation ok"
-  read -rp "softlink done"
+  #read -rp "softlink done: pausing for human checks"
 else
   print_v e "failure in creation of softlink undoing mv"
   if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
@@ -160,10 +160,6 @@ else
   fi
     exit 1
 fi
-
-
-print_v d "TODO: check for disk percent full vs size of predicted export"
-print_v d "TODO: have #s of backups"
 
 print_v i "Starting Incus Exports $(date)"  > "$LOG_FILE"
 
@@ -189,7 +185,9 @@ fi
 #mail $ADMIN -s "backup starting" < /etc/cron.d/backups
 
 #for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
-for INSTANCE in $(incus list name=EXAMPLE -c n -f csv); do
+incus list name=EXAMPLE -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+
+  print_v d "Todo: check if size $SIZE for $INSTANCE is ok"
 
   #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
   for i in $(seq $END -1 0); do
