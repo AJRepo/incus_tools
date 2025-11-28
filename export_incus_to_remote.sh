@@ -81,32 +81,29 @@ function dependencies_check() {
    local version=
 
    if [ ! -x "$INCUS" ]; then
-      print_v e "'$INCUS' cannot be found or executed"
-      _ret=1
+     print_v e "'$INCUS' cannot be found or executed"
+     _ret=1
    fi
 
    if [ ! -x "$MAIL" ]; then
-      print_v e "'$MAIL' cannot be found or executed"
-      _ret=1
+     print_v e "'$MAIL' cannot be found or executed"
+     _ret=1
    fi
 
    version=$(incus_version)
    if check_version "$version" '6.18'; then
-      if check_version "$version" '1.0.0'; then
-         print_v d "incus version '$version' is supported"
-      fi
+     print_v d "incus version '$version' is supported"
    else
-      print_v e "Detected incus version '$version'. Please use incus 6.18 or later"
-      _ret=2
+     print_v e "Detected incus version '$version'. Please use incus 6.18 or later"
+     _ret=2
    fi
 
   # Root needed for a few operations.
   if [[ $EUID -ne 0 ]]; then
-     print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
-     _ret=2
+    print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
+    _ret=2
   fi
-
-   return $_ret
+    return $_ret
 }
 
 #Return 0 (true) if is running, Return 1 (false) if not running
