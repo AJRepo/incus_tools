@@ -12,6 +12,8 @@ MAIL="/usr/bin/mail"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 
 #Variables
+DRY_RUN=''
+VERBOSE=''
 HOSTNAME=$(hostname)
 ADMIN="monitoring@example.com"
 NFS_SERVER="TOSET"
@@ -58,7 +60,43 @@ function print_v() {
   esac
 }
 
+function print_usage() {
+  cat <<EOM
+  $0 version $VERSION - Afan Ottenheimer
 
+  Usage:
+
+     $0 [-h] [-d] [-n] [-v]
+
+     Options:
+        -h                help
+        -d                debug
+        -n                dry run (do not export or iterate backups)
+        -v                pass '--verbose' to incus export command
+    Version Requirements:
+      incus >= 6.18 (if using the check size before export functionality)
+
+EOM
+}
+
+while getopts "vdhn" opt; do
+  case "${opt}" in
+  h | \?)
+    print_usage
+    exit 1
+    ;;
+  n)
+    DRY_RUN=1
+    ;;
+  v)
+    VERBOSE=' --verbose'
+    ;;
+  d)
+    DEBUG=1
+    VERBOSE=' --verbose'
+    ;;
+  esac
+done
 
 # return 0 if program version is equal or greater than check version
 function check_version()
@@ -171,7 +209,7 @@ fi
 if [ -n "$STY" ]; then
   print_v d "Running in a screen session."
 else
-  print_v w "Not running in a screen session. Could be a problem if diconnected"
+  print_v w "Not running in a screen session. Could be a problem if diconnected."
   read -rp "press enter key to continue"
 fi
 
@@ -250,46 +288,48 @@ fi
 #$MAIL $ADMIN -s "backup starting" < /etc/cron.d/backups
 
 #for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
-#$INCUS list state=RUNNING -c nD -f csv | sed -e /Calmail/d | while IFS=',' read -r INSTANCE SIZE; do
-#$INCUS list name=Calmail101 -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+
 $INCUS list "$INCUS_LIST" -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+  #While loop over above line
+  if [[ $DRY_RUN -eq 1 ]]; then
+    print_v d "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
+  else
+    print_v d "Todo: check if size $SIZE for $INSTANCE is ok"
 
-  print_v d "Todo: check if size $SIZE for $INSTANCE is ok"
-
-  #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
-  for i in $(seq $END -1 0); do
-    if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
-      NEXT=$((i+1))
-      mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+    #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
+    for i in $(seq $END -1 0); do
+      if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
+        NEXT=$((i+1))
+        mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+      fi
+    done
+    if [ -d "$ROOT_DIR/$INSTANCE.$TERM" ]; then
+      rm -r "$ROOT_DIR/$INSTANCE.$TERM"
     fi
-  done
-  if [ -d "$ROOT_DIR/$INSTANCE.$TERM" ]; then
-    rm -r "$ROOT_DIR/$INSTANCE.$TERM"
-  fi
 
-  #Check if .0 directory exists and if not create it
-  if [ ! -d "/$ROOT_DIR/$INSTANCE.0" ] ; then
-    print_v d "CREATING $ROOT_DIR/$INSTANCE.0"
-    if ! mkdir -p "$ROOT_DIR/$INSTANCE.0"; then
-      print_v e "Creating directory failed: $HOSTNAME"
+    #Check if .0 directory exists and if not create it
+    if [ ! -d "/$ROOT_DIR/$INSTANCE.0" ] ; then
+      print_v d "CREATING $ROOT_DIR/$INSTANCE.0"
+      if ! mkdir -p "$ROOT_DIR/$INSTANCE.0"; then
+        print_v e "Creating directory failed: $HOSTNAME"
+        restore_incus_backups_dir
+        exit 1
+      fi
+    fi
+
+    print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
+    if $INCUS export "$VERBOSE" --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
+      print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
+    else
+      print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
       restore_incus_backups_dir
       exit 1
     fi
+
   fi
-
-  print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-  if $INCUS export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
-    print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
-  else
-    print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
-    restore_incus_backups_dir
-    exit 1
-  fi
-
-
 done
-print_v i "Success: $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
-$MAIL -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
+print_v i "Success: All $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
+$MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
 
 #need to have ssh key-pair setup to get rsync-via-ssh to be enabled, note trailing / is very important
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT/ backup_user@backup_server.example.com:~/server2/$OBJECT/
