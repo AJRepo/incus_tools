@@ -1,8 +1,38 @@
 #!/bin/bash
 # vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
 
-DEBUG=1
+VERSION="1.0.1"
+
+# Fail if one process fails in a pipe
+set -o pipefail
+
+#Executables
+INCUS="/usr/bin/incus"
+MAIL="/usr/bin/mail"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
+
+#Variables
+HOSTNAME=$(hostname)
+ADMIN="monitoring@example.com"
+NFS_SERVER="TOSET"
+INCUS_LIST="state=running"
+BACKUP_LOCAL_ROOT_DIR="TOSET"
+#Do not have NFS_REMOTE_ROOT_DIR end with a "/"
+NFS_REMOTE_ROOT_DIR="/path/TOSET/$HOSTNAME"
+BACKUP_LOCAL_TEMP_DIR="$BACKUP_LOCAL_ROOT_DIR/temp_backups/backups/"
+
+START_TIME=$(date +%Y%m%d.%H%M%S)
+LOG_FILE="/tmp/incus_export_to_remote.$START_TIME.txt"
+
+SCRIPT_DIR=$(dirname "$0")
+# shellcheck source=export_incus_to_remote.env
+if ! source "$SCRIPT_DIR/export_incus_to_remote.env"; then
+  echo "Error: Can not find export_incus_to_remote.env file"
+  exit 1
+fi
+
+#get the actual backup location
+INCUS_BACKUP_PATH=$(realpath $INCUS_DEFAULT_BACKUP_DIR)
 
 #
 # #Functions:
@@ -28,37 +58,56 @@ function print_v() {
   esac
 }
 
-#Variables
-HOSTNAME=$(hostname)
-ADMIN="monitoring@example.com"
-NFS_SERVER="TOSET"
-BACKUP_LOCAL_ROOT_DIR="TOSET"
-#Do not have NFS_REMOTE_ROOT_DIR end with a "/"
-NFS_REMOTE_ROOT_DIR="/path/TOSET/$HOSTNAME"
-BACKUP_LOCAL_TEMP_DIR="$BACKUP_LOCAL_ROOT_DIR/temp_backups/backups/"
-
-LOG_FILE="/tmp/last_incus_export.txt"
-
-#SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-SCRIPT_DIR=$(dirname "$0")
-if ! source "$SCRIPT_DIR/export_incus_to_remote.env"; then
-  print_v e "Can not find .env file"
-  exit 1
-fi
-
-#get the actual backup location
-INCUS_BACKUP_PATH=$(realpath $INCUS_DEFAULT_BACKUP_DIR)
 
 
-if [[ $NFS_SERVER == "TOSET" ]]; then
-  print_v e "See .env file and set variables"
-  exit 1
-elif [[ $DEBUG == 1 ]]; then
-  print_v d "ADMIN=$ADMIN"
-  print_v d "NFS_SERVER=$NFS_SERVER"
-  print_v d "BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
-  print_v d "NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
-fi
+# return 0 if program version is equal or greater than check version
+function check_version()
+{
+    local version=$1 check=$2
+    local winner=
+
+    winner=$(echo -e "$version\n$check" | sed '/^$/d' | sort -Vr | head -1)
+    [[ "$winner" = "$version" ]] && return 0
+    return 1
+}
+
+function incus_version() {
+  $INCUS version | awk '/Server version: / { print $3}'
+}
+
+# Dependencies check
+function dependencies_check() {
+   local _ret=0
+   local version=
+
+   if [ ! -x "$INCUS" ]; then
+      print_v e "'$INCUS' cannot be found or executed"
+      _ret=1
+   fi
+
+   if [ ! -x "$MAIL" ]; then
+      print_v e "'$MAIL' cannot be found or executed"
+      _ret=1
+   fi
+
+   version=$(incus_version)
+   if check_version "$version" '6.18'; then
+      if check_version "$version" '1.0.0'; then
+         print_v d "incus version '$version' is supported"
+      fi
+   else
+      print_v e "Detected incus version '$version'. Please use incus 6.18 or later"
+      _ret=2
+   fi
+
+  # Root needed for a few operations.
+  if [[ $EUID -ne 0 ]]; then
+     print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
+     _ret=2
+  fi
+
+   return $_ret
+}
 
 #Return 0 (true) if is running, Return 1 (false) if not running
 function is_incus_export_running() {
@@ -105,11 +154,30 @@ function restore_incus_backups_dir() {
   fi
 }
 
-# Root needed for a few operations.
-if [[ $EUID -ne 0 ]]; then
-   print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
-   exit 1
+#Check if dependencies are ok
+if ! dependencies_check; then
+  print_v e "Dependencies Check failed"
+  exit 3
 fi
+
+if [[ $NFS_SERVER == "TOSET" ]]; then
+  print_v e "See .env file and set variables"
+  exit 1
+elif [[ $DEBUG == 1 ]]; then
+  print_v d "ADMIN=$ADMIN"
+  print_v d "NFS_SERVER=$NFS_SERVER"
+  print_v d "BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
+  print_v d "NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
+fi
+
+
+if [ -n "$STY" ]; then
+  print_v d "Running in a screen session."
+else
+  print_v w "Not running in a screen session. Could be a problem if diconnected"
+  read -rp "press enter key to continue"
+fi
+
 
 if is_incus_export_running; then
   print_v e "Do not run this script while an export is already running. Exiting."
@@ -127,7 +195,7 @@ fi
 #did that mount succeed? One more test.
 if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
   print_v e  "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"| tee -a "$LOG_FILE"
-  mail $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"  < "$LOG_FILE"
+  $MAIL $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"  < "$LOG_FILE"
   exit 1
 fi
 
@@ -161,7 +229,7 @@ else
     exit 1
 fi
 
-print_v i "Starting Incus Exports $(date)"  > "$LOG_FILE"
+print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LOG_FILE"
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
@@ -177,15 +245,17 @@ TERM=$((END+1))
 if [ ! -d "$ROOT_DIR" ]; then
   if ! mkdir -p "$ROOT_DIR"; then
     print_v e "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
-    mail $ADMIN -s "$HOSTNAME: NFS connect to $NFS_SERVER failed" < /etc/cron.d/backups
+    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $NFS_SERVER failed" < /etc/cron.d/backups
     exit 1
   fi
 fi
 
-#mail $ADMIN -s "backup starting" < /etc/cron.d/backups
+#$MAIL $ADMIN -s "backup starting" < /etc/cron.d/backups
 
 #for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
-incus list name=EXAMPLE -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+#$INCUS list state=RUNNING -c nD -f csv | sed -e /Calmail/d | while IFS=',' read -r INSTANCE SIZE; do
+#$INCUS list name=Calmail101 -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+$INCUS list "$INCUS_LIST" -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
 
   print_v d "Todo: check if size $SIZE for $INSTANCE is ok"
 
@@ -211,7 +281,7 @@ incus list name=EXAMPLE -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
   fi
 
   print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-  if incus export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
+  if $INCUS export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
     print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
   else
     print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
@@ -222,7 +292,7 @@ incus list name=EXAMPLE -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
 
 done
 print_v i "Success: $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
-mail -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
+$MAIL -s "Success: $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
 
 #need to have ssh key-pair setup to get rsync-via-ssh to be enabled, note trailing / is very important
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT/ backup_user@backup_server.example.com:~/server2/$OBJECT/
