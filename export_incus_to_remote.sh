@@ -46,7 +46,9 @@ function print_v() {
 
   case $level in
     d) # Debug
-    echo -e "$THIS_DATE [DBUG] ${*:2}"
+      if [[ $DEBUG == "1" ]]; then
+        echo -e "$THIS_DATE [DBUG] ${*:2}"
+      fi
     ;;
     e) # Error
     echo -e "$THIS_DATE [ERRS] ${*:2}"
@@ -74,7 +76,7 @@ function print_usage() {
         -n                dry run (do not export or iterate backups)
         -v                pass '--verbose' to incus export command
     Version Requirements:
-      incus >= 6.18 (if using the check size before export functionality)
+      incus >= 6.19 (if using the check size before export functionality)
 
 EOM
 }
@@ -129,16 +131,19 @@ function dependencies_check() {
    fi
 
    version=$(incus_version)
-   if check_version "$version" '6.18'; then
-     print_v d "incus version '$version' is supported"
+   if check_version "$version" '6.19'; then
+     print_v d "Detected incus version '$version'. 6.19 and later supports checking for backup disk space."
+     SUPPORTS_DISK_CHECK=1
+     LIST_FORMAT="csv,raw"
    else
-     print_v e "Detected incus version '$version'. Please use incus 6.18 or later"
-     _ret=2
+     print_v e "Detected incus version '$version'. Please use incus 6.19 or later to check backup disk space."
+     SUPPORTS_DISK_CHECK=0
+     LIST_FORMAT="csv"
    fi
 
   # Root needed for a few operations.
   if [[ $EUID -ne 0 ]]; then
-    print_v e "This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
+    print_v e "Depencency check fail: This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
     _ret=2
   fi
     return $_ret
@@ -154,11 +159,11 @@ function is_incus_export_running() {
 
   #There should be only one PID, but let's not assume
   for PID in $INCUSD_PID; do
-    print_v d "INCUS_PID=$PID"
+    print_v d "Found INCUS_PID=$PID"
     if lsof -p "$PID" | grep "$INCUS_BACKUP_PATH"; then
       return 0
     else
-      print_v d "INCUS_PID=$PID: No Backup Running"
+      print_v d "Checking INCUS_PID=$PID: No Backup Running"
       return 1
     fi
   done
@@ -166,14 +171,16 @@ function is_incus_export_running() {
 
 function restore_incus_backups_dir() {
   #at end of this unmount NFS dir and set all back
-  if is_incus_export_running; then
+  if is_incus_export_running; then  #return 0 (yes) if it is still running
     print_v w "Export still running? It shouldn't be at this point."
     sleep 5
-  fi
-  if is_incus_export_running; then
-    print_v w "Export still running? It shouldn't be at this point."
-    read -rp "pausing for human intervention"
-    exit 1
+    if is_incus_export_running; then
+      print_v w "Export still running? It shouldn't be at this point."
+      read -rp "pausing for human intervention. Will run exit with any key."
+      exit 1
+    fi
+  else
+    print_v d "Incus Export is not still running. Moving forward"
   fi
   # remove link to backup NFS dir
   if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
@@ -191,7 +198,7 @@ function restore_incus_backups_dir() {
 
 #Check if dependencies are ok
 if ! dependencies_check; then
-  print_v e "Dependencies Check failed"
+  print_v e "Some Dependency Checks failed. See above messages for more info."
   exit 3
 fi
 
@@ -205,14 +212,14 @@ elif [[ $DEBUG == 1 ]]; then
   print_v d "NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
 fi
 
-
 if [ -n "$STY" ]; then
   print_v d "Running in a screen session."
 else
-  print_v w "Not running in a screen session. Could be a problem if diconnected."
-  read -rp "press enter key to continue"
+  if tty -s; then
+    print_v w "Interactive shell and not running in a screen session! Could be a problem if diconnected."
+    read -rp "press enter key to continue. Press Ctrl-C to exit."
+  fi
 fi
-
 
 if is_incus_export_running; then
   print_v e "Do not run this script while an export is already running. Exiting."
@@ -288,18 +295,34 @@ fi
 #$MAIL $ADMIN -s "backup starting" < /etc/cron.d/backups
 
 #for INSTANCE in $(incus list state=RUNNING -c n -f csv); do
+#for INSTANCE in $(incus list state=RUNNING -c n -f csv,raw); do
 
-$INCUS list "$INCUS_LIST" -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
+$INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r INSTANCE SIZE; do
   #While loop over above line
-  if [[ $DRY_RUN -eq 1 ]]; then
-    print_v d "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
+  print_v d "DRY_RUN='$DRY_RUN'"
+  if [[ $SUPPORTS_DISK_CHECK == "1" ]]; then
+    print_v d "Check if size $SIZE for $INSTANCE is ok for $BACKUP_LOCAL_ROOT_DIR"
+    SPACE_REMAINING=$(df --output=avail $BACKUP_LOCAL_ROOT_DIR | tail -1)
+    #Set a buffer of 10 Gigs
+    BUFFER=10000000
+    if [ "$(echo "$SPACE_REMAINING - $BUFFER - $SIZE" | bc)" -lt 0 ]; then
+      print_v e "Can't back up because space remaining+buffer insufficient for instance of size=$SIZE"
+      exit 1
+    else
+      print_v d "Disk check: Sufficient space on $BACKUP_LOCAL_ROOT_DIR ($SPACE_REMAINING) for $INSTANCE ($SIZE)"
+    fi
   else
-    print_v d "Todo: check if size $SIZE for $INSTANCE is ok"
+    print_v d "Use incus 6.19 or later for backup location disk space checks vs size of backup"
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    print_v v "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
+  else
 
     #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
     for i in $(seq $END -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
         NEXT=$((i+1))
+        print_v d "mv $ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
         mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
       fi
     done
@@ -318,7 +341,7 @@ $INCUS list "$INCUS_LIST" -c nD -f csv | while IFS=',' read -r INSTANCE SIZE; do
     fi
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-    if $INCUS export "$VERBOSE" --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" ; then
+    if $INCUS export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "$VERBOSE"; then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
       print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
