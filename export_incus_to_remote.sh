@@ -368,7 +368,8 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
     fi
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-    if $INCUS export --optimized-storage --instance-only "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "$VERBOSE"; then
+    print_v d "$INCUS export $VERBOSE --optimized-storage --instance-only $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"
+    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" --optimized-storage --instance-only; then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
       print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
