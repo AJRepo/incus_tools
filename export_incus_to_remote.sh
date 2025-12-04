@@ -217,6 +217,7 @@ if [ -n "$STY" ]; then
 else
   if tty -s; then
     print_v w "Interactive shell and not running in a screen session! Could be a problem if diconnected."
+    print_v w "About to backup $INCUS_LIST"
     read -rp "press enter key to continue. Press Ctrl-C to exit."
   fi
 fi
@@ -301,12 +302,13 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
   #While loop over above line
   print_v d "DRY_RUN='$DRY_RUN'"
   if [[ $SUPPORTS_DISK_CHECK == "1" ]]; then
-    print_v d "Check if size $SIZE for $INSTANCE is ok for $BACKUP_LOCAL_ROOT_DIR"
-    SPACE_REMAINING=$(df --output=avail $BACKUP_LOCAL_ROOT_DIR | tail -1)
+    SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
+    print_v d "Check if size $INSTANCE ($SIZE) is ok for $BACKUP_LOCAL_ROOT_DIR ($SPACE_REMAINING)"
     #Set a buffer of 10 Gigs
     BUFFER=10000000
-    if [ "$(echo "$SPACE_REMAINING - $BUFFER - $SIZE" | bc)" -lt 0 ]; then
-      print_v e "Can't back up because space remaining+buffer insufficient for instance of size=$SIZE"
+    AVAIL=$((SPACE_REMAINING - BUFFER - SIZE))
+    if [ $AVAIL -lt 0 ]; then
+      print_v e "Can't back up because remaining-buffer-size ($AVAIL) is less than 0 for instance of size=$SIZE"
       exit 1
     else
       print_v d "Disk check: Sufficient space on $BACKUP_LOCAL_ROOT_DIR ($SPACE_REMAINING) for $INSTANCE ($SIZE)"
