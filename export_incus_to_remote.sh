@@ -115,6 +115,30 @@ function incus_version() {
   $INCUS version | awk '/Server version: / { print $3}'
 }
 
+# function: inside_screen. Tests to see if we are in a screen.
+# We can't rely on $STY because sudo strips variables.
+inside_screen() {
+  print_v d "Testing to see if in a screen"
+  pid=$$
+  while [ "$pid" -ne 1 ]; do
+      # Get the command name of this pid
+      comm=$(ps -o comm= -p "$pid" | tr -d '[:space:]')
+      if [ "$comm" = "screen" ]; then
+          print_v d "Inside screen"
+          return 0
+      fi
+
+      # Get the parent pid, strip whitespace, default to 1 if empty
+      ppid=$(ps -o ppid= -p "$pid" | tr -d '[:space:]')
+      [ -z "$ppid" ] && ppid=1
+      pid=$ppid
+  done
+
+  print_v d "Not inside screen"
+  return 1
+}
+
+
 # Dependencies check
 function dependencies_check() {
    local _ret=0
@@ -132,7 +156,7 @@ function dependencies_check() {
 
    version=$(incus_version)
    if check_version "$version" '6.19'; then
-     print_v d "Detected incus version '$version'. 6.19 and later supports checking for backup disk space."
+     print_v d "Detected incus version '$version'. Incus>=6.19 supports checking for backup disk space."
      SUPPORTS_DISK_CHECK=1
      LIST_FORMAT="csv,raw"
    else
@@ -180,11 +204,11 @@ function restore_incus_backups_dir() {
       exit 1
     fi
   else
-    print_v d "Incus Export is not still running. Moving forward"
+    print_v d "Incus Export completed. Moving forward"
   fi
   # remove link to backup NFS dir
   if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
-    print_v d "Removing softlink"
+    print_v d "$INCUS_DEFAULT_BACKUP_DIR is a softlink. Removing softlink"
     rm $INCUS_DEFAULT_BACKUP_DIR;
   else
     print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
@@ -192,6 +216,7 @@ function restore_incus_backups_dir() {
   fi
   # Restoring old link or dir for incus
   if [ ! -e $INCUS_DEFAULT_BACKUP_DIR ]; then
+    print_v d "Restoring /var/lib/incus/backups.bak to $INCUS_DEFAULT_BACKUP_DIR"
     mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
   fi
 }
@@ -208,11 +233,11 @@ if [[ $NFS_SERVER == "TOSET" ]]; then
 elif [[ $DEBUG == 1 ]]; then
   print_v d "ADMIN=$ADMIN"
   print_v d "NFS_SERVER=$NFS_SERVER"
-  print_v d "BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
-  print_v d "NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
+  print_v d "Local Mountpoint: BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
+  print_v d "Remote Server: NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
 fi
 
-if [ -n "$STY" ]; then
+if inside_screen; then
   print_v d "Running in a screen session."
 else
   if tty -s; then
@@ -363,6 +388,6 @@ $MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
 restore_incus_backups_dir
 
 umount "$BACKUP_LOCAL_ROOT_DIR"
-print_v d "Finished with export"
+print_v d "Finished with exports"
 exit 0
 
