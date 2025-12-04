@@ -95,7 +95,7 @@ while getopts "vdhn" opt; do
     ;;
   d)
     DEBUG=1
-    VERBOSE=' --verbose'
+    VERBOSE='--verbose'
     ;;
   esac
 done
@@ -349,8 +349,14 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
     for i in $(seq $END -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
         NEXT=$((i+1))
-        print_v d "mv $ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
-        mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+        PREVIOUS=$((i-1))
+        #don't archive an empty directory
+        if [ -d  "$ROOT_DIR/$INSTANCE.$PREVIOUS" ] && [ -z "$(ls -A "$ROOT_DIR/$INSTANCE.$PREVIOUS")" ]; then
+          print_v d "Skipping mv of $ROOT_DIR/$INSTANCE.$i since nothing in $ROOT_DIR/$INSTANCE.$PREVIOUS"
+        else
+          print_v d "mv $ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+          mv "$ROOT_DIR/$INSTANCE.$i" "$ROOT_DIR/$INSTANCE.$NEXT"
+        fi
       fi
     done
     if [ -d "$ROOT_DIR/$INSTANCE.$TERM" ]; then
@@ -369,7 +375,7 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
     print_v d "$INCUS export $VERBOSE --optimized-storage --instance-only $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"
-    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" --optimized-storage --instance-only; then
+    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" --optimized-storage --instance-only "$VERBOSE"; then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
       print_v e "FAIL: Export of $INSTANCE failed" | tee -a "$LOG_FILE"
