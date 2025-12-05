@@ -95,7 +95,7 @@ while getopts "vdhnl:" opt; do
     INCUS_LIST=${OPTARG}
     ;;
   v)
-    VERBOSE=' --verbose'
+    VERBOSE='--verbose'
     ;;
   d)
     DEBUG=1
@@ -377,7 +377,7 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
     fi
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-    print_v d "$INCUS export $VERBOSE --optimized-storage --instance-only $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"
+    print_v d "$INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz $VERBOSE --optimized-storage --instance-only"
     if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" --optimized-storage --instance-only "$VERBOSE"; then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
