@@ -68,20 +68,21 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-n] [-v]
+     $0 [-h] [-d] [-n] [-v] [-l incus_list ]
 
      Options:
         -h                help
         -d                debug
         -n                dry run (do not export or iterate backups)
         -v                pass '--verbose' to incus export command
+        -l                items to export. Defaults to 'state=running'
     Version Requirements:
       incus >= 6.19 (if using the check size before export functionality)
 
 EOM
 }
 
-while getopts "vdhn" opt; do
+while getopts "vdhnl:" opt; do
   case "${opt}" in
   h | \?)
     print_usage
@@ -89,6 +90,9 @@ while getopts "vdhn" opt; do
     ;;
   n)
     DRY_RUN=1
+    ;;
+  l)
+    INCUS_LIST=${OPTARG}
     ;;
   v)
     VERBOSE=' --verbose'
@@ -344,7 +348,6 @@ $INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT" | while IFS=',' read -r 
   if [[ $DRY_RUN -eq 1 ]]; then
     print_v v "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
   else
-
     #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
     for i in $(seq $END -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
