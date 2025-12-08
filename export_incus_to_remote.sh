@@ -13,7 +13,7 @@ INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 
 #Variables
 DRY_RUN=''
-VERBOSE=''
+INCUS_ARGS=(--optimized-storage --instance-only)
 HOSTNAME=$(hostname)
 ADMIN="monitoring@example.com"
 NFS_SERVER="TOSET"
@@ -95,11 +95,11 @@ while getopts "vdhnl:" opt; do
     INCUS_LIST=${OPTARG}
     ;;
   v)
-    VERBOSE='--verbose'
+    INCUS_ARGS+=(--verbose)
     ;;
   d)
     DEBUG=1
-    VERBOSE='--verbose'
+    INCUS_ARGS+=(--verbose)
     ;;
   esac
 done
@@ -377,8 +377,8 @@ while IFS=',' read -r INSTANCE SIZE; do
     fi
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
-    print_v i "Command: $INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz --optimized-storage --instance-only $VERBOSE"
-    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" --optimized-storage --instance-only "$VERBOSE"; then
+    print_v i "Command: $INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}"
+    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}"; then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
       print_v e "FAIL: The export of $INSTANCE failed" | tee -a "$LOG_FILE"
