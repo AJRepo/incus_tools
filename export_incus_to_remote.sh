@@ -57,6 +57,9 @@ function print_v() {
     e) # Error
     echo -e "$THIS_DATE [ERRS] ${*:2}"
     ;;
+    f) # Error
+    echo -e "$THIS_DATE [FAIL] ${*:2}"
+    ;;
     w) # Warning
     echo -e "$THIS_DATE [WARN] ${*:2}"
     ;;
@@ -185,7 +188,7 @@ function dependencies_check() {
 
   # Root needed for a few operations.
   if [[ $EUID -ne 0 ]]; then
-    print_v e "Depencency check fail: This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
+    print_v e "Depencency check fail: This script must be run as root: HOSTNAME='$HOSTNAME'" | tee -a "$LOG_FILE"
     _ret=2
   fi
     return $_ret
@@ -194,7 +197,7 @@ function dependencies_check() {
 #Return 0 (true) if is running, Return 1 (false) if not running
 function is_incus_export_running() {
   if ! INCUSD_PID=$(pgrep -f incusd); then
-    print_v e "Can't find incusd process_id. Exiting"
+    print_v f "Can't find incusd process_id. Exiting"
     pgrep -f incusd
     exit 1
   fi
@@ -229,7 +232,7 @@ function restore_incus_backups_dir() {
     print_v d "$INCUS_DEFAULT_BACKUP_DIR is a softlink. Removing softlink"
     rm $INCUS_DEFAULT_BACKUP_DIR;
   else
-    print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
+    print_v f "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
     exit 1
   fi
   # Restoring old link or dir for incus
@@ -241,7 +244,7 @@ function restore_incus_backups_dir() {
 
 #Check if dependencies are ok
 if ! dependencies_check; then
-  print_v e "Some Dependency Checks failed. See above messages for more info."
+  print_v f "Some Dependency Checks failed. See above messages for more info."
   exit 3
 fi
 
@@ -264,7 +267,7 @@ else
 fi
 
 if is_incus_export_running; then
-  print_v e "Do not run this script while an export is already running. Exiting."
+  print_v f "Do not run this script while an export is already running. Exiting."
   exit 1
 else
   print_v d "No other export is running."
@@ -278,7 +281,7 @@ fi
 
 #did that mount succeed? One more test.
 if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
-  print_v e  "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"| tee -a "$LOG_FILE"
+  print_v f  "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"| tee -a "$LOG_FILE"
   $MAIL $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"  < "$LOG_FILE"
   exit 1
 fi
@@ -287,7 +290,7 @@ fi
 if [ ! -e /var/lib/incus/backups.bak ] && mv $INCUS_DEFAULT_BACKUP_DIR /var/lib/incus/backups.bak; then
   print_v d "move of backups dir $INCUS_DEFAULT_BACKUP_DIR link ok"
 else
-  print_v e "failure in moving backups dir to /var/lib/incus/backups.bak"
+  print_v f "failure in moving backups dir to /var/lib/incus/backups.bak"
   exit 1
 fi
 
@@ -302,15 +305,15 @@ else
     print_v d "Removing softlink"
     rm $INCUS_DEFAULT_BACKUP_DIR;
   else
-    print_v e "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
+    print_v f "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
     exit 1
   fi
   if [ -e /var/lib/incus/backups.bak ]; then
     mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
   else
-    print_v e "Can't move /var/lib/incus/backups.bak back to $INCUS_DEFAULT_BACKUP_DIR"
-  fi
+    print_v f "Can't move /var/lib/incus/backups.bak back to $INCUS_DEFAULT_BACKUP_DIR"
     exit 1
+  fi
 fi
 
 print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LOG_FILE"
@@ -326,7 +329,7 @@ TERM=$((EXPORTS_TO_KEEP+1))
 #check to make sure this is a location that is ok.
 if [ ! -d "$ROOT_DIR" ]; then
   if ! mkdir -p "$ROOT_DIR"; then
-    print_v e "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
+    print_v f "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
     $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $REMOTE_SERVER failed" < /etc/cron.d/backups
     exit 1
   fi
@@ -347,7 +350,7 @@ while IFS=',' read -r INSTANCE SIZE; do
     BUFFER=10000000
     AVAIL=$((SPACE_REMAINING - BUFFER - SIZE))
     if [ $AVAIL -lt 0 ]; then
-      print_v e "Can't back up because remaining-buffer-size ($AVAIL) is less than 0 for instance of size=$SIZE"
+      print_v f "Can't back up because remaining-buffer-size ($AVAIL) is less than 0 for instance of size=$SIZE"
       exit 1
     else
       print_v d "Disk check: Sufficient space on $BACKUP_LOCAL_ROOT_DIR ($SPACE_REMAINING) for $INSTANCE ($SIZE)"
@@ -380,7 +383,7 @@ while IFS=',' read -r INSTANCE SIZE; do
     if [ ! -d "/$ROOT_DIR/$INSTANCE.0" ] ; then
       print_v d "CREATING $ROOT_DIR/$INSTANCE.0"
       if ! mkdir -p "$ROOT_DIR/$INSTANCE.0"; then
-        print_v e "Creating directory failed: $HOSTNAME"
+        print_v f "Creating directory failed: $HOSTNAME"
         restore_incus_backups_dir
         exit 1
       fi
