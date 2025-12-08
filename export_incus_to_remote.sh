@@ -15,10 +15,12 @@ INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 DRY_RUN=''
 #How many full exports (e.g. backups) to keep
 EXPORTS_TO_KEEP=2
+#Remote Backup Method: (nfs only now, rsync over ssh later)
+BACKUP_METHOD="nfs"
 INCUS_ARGS=(--optimized-storage --instance-only)
 HOSTNAME=$(hostname)
 ADMIN="monitoring@example.com"
-NFS_SERVER="TOSET"
+REMOTE_SERVER="ip.x.x.x"
 INCUS_LIST="state=running"
 BACKUP_LOCAL_ROOT_DIR="TOSET"
 #Do not have NFS_REMOTE_ROOT_DIR end with a "/"
@@ -171,6 +173,16 @@ function dependencies_check() {
      LIST_FORMAT="csv"
    fi
 
+  if [[ $BACKUP_METHOD != "nfs" ]]; then
+    print_v e "Only NFS for a backup method is currently supported"
+  fi
+
+  if [[ $REMOTE_SERVER == "ip.x.x.x" ]]; then
+    print_v e "REMOTE_SERVER is not set. See .env file and set variables"
+    _ret=2
+  fi
+
+
   # Root needed for a few operations.
   if [[ $EUID -ne 0 ]]; then
     print_v e "Depencency check fail: This script must be run as root: $HOSTNAME" | tee -a "$LOG_FILE"
@@ -233,14 +245,12 @@ if ! dependencies_check; then
   exit 3
 fi
 
-if [[ $NFS_SERVER == "TOSET" ]]; then
-  print_v e "See .env file and set variables"
-  exit 1
-elif [[ $DEBUG == 1 ]]; then
-  print_v d "ADMIN=$ADMIN"
-  print_v d "NFS_SERVER=$NFS_SERVER"
-  print_v d "Local Mountpoint: BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
-  print_v d "Remote Server: NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
+if [[ $DEBUG == 1 ]]; then
+  print_v d "Dependencies Check passed:"
+  print_v d "  ADMIN=$ADMIN"
+  print_v d "  REMOTE_SERVER=$REMOTE_SERVER"
+  print_v d "  Local Mountpoint: BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
+  print_v d "  Remote Server: NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
 fi
 
 if inside_screen; then
@@ -263,13 +273,13 @@ fi
 #check to make sure this is a network mounted location
 if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
   print_v d "Not a mountpoint, mounting" | tee -a "$LOG_FILE"
-  mount -t nfs4 "$NFS_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
+  mount -t nfs4 "$REMOTE_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
 fi
 
 #did that mount succeed? One more test.
 if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
-  print_v e  "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"| tee -a "$LOG_FILE"
-  $MAIL $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $NFS_SERVER failed"  < "$LOG_FILE"
+  print_v e  "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"| tee -a "$LOG_FILE"
+  $MAIL $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"  < "$LOG_FILE"
   exit 1
 fi
 
@@ -317,7 +327,7 @@ TERM=$((EXPORTS_TO_KEEP+1))
 if [ ! -d "$ROOT_DIR" ]; then
   if ! mkdir -p "$ROOT_DIR"; then
     print_v e "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
-    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $NFS_SERVER failed" < /etc/cron.d/backups
+    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $REMOTE_SERVER failed" < /etc/cron.d/backups
     exit 1
   fi
 fi
