@@ -11,8 +11,10 @@ INCUS="/usr/bin/incus"
 MAIL="/usr/bin/mail"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 
-#Variables
+#Default Variables (see .env file for overrrides)
 DRY_RUN=''
+#How many full exports (e.g. backups) to keep
+EXPORTS_TO_KEEP=2
 INCUS_ARGS=(--optimized-storage --instance-only)
 HOSTNAME=$(hostname)
 ADMIN="monitoring@example.com"
@@ -305,9 +307,7 @@ print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LO
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
-#How many full exports to keep
-END=2
-TERM=$((END+1))
+TERM=$((EXPORTS_TO_KEEP+1))
 
 
 #print_v e $ROOT_DIR
@@ -349,7 +349,7 @@ while IFS=',' read -r INSTANCE SIZE; do
     print_v v "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
   else
     #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
-    for i in $(seq $END -1 0); do
+    for i in $(seq $EXPORTS_TO_KEEP -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
         NEXT=$((i+1))
         PREVIOUS=$((i-1))
