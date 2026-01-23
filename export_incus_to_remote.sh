@@ -13,6 +13,7 @@ INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 
 #Default Variables (see .env file for overrrides)
 DRY_RUN=''
+SEND_MAIL=''
 #How many full exports (e.g. backups) to keep
 EXPORTS_TO_KEEP=2
 #Remote Backup Method: (nfs only now, rsync over ssh later)
@@ -31,6 +32,7 @@ START_TIME=$(date +%Y%m%d.%H%M%S)
 LOG_FILE="/tmp/incus_export_to_remote.$START_TIME.txt"
 
 SCRIPT_DIR=$(dirname "$0")
+# shellcheck disable=SC1091
 # shellcheck source=export_incus_to_remote.env
 if ! source "$SCRIPT_DIR/export_incus_to_remote.env"; then
   echo "Error: Can not find export_incus_to_remote.env file"
@@ -75,7 +77,7 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-n] [-v] [-l incus_list ]
+     $0 [-h] [-d] [-m] [-n] [-v] [-l incus_list ]
 
      Options:
         -h                help
@@ -91,21 +93,24 @@ EOM
 
 while getopts "vdhnl:" opt; do
   case "${opt}" in
+  d)
+    DEBUG=1
+    INCUS_ARGS+=(--verbose)
+    ;;
   h | \?)
     print_usage
     exit 1
     ;;
-  n)
-    DRY_RUN=1
-    ;;
   l)
     INCUS_LIST=${OPTARG}
     ;;
-  v)
-    INCUS_ARGS+=(--verbose)
+  m)
+    SEND_MAIL=1
     ;;
-  d)
-    DEBUG=1
+  n)
+    DRY_RUN=1
+    ;;
+  v)
     INCUS_ARGS+=(--verbose)
     ;;
   esac
@@ -160,8 +165,9 @@ function dependencies_check() {
      _ret=1
    fi
 
-   if [ ! -x "$MAIL" ]; then
+   if [[ ! -x "$MAIL" && $SEND_MAIL -eq 1 ]]; then
      print_v e "'$MAIL' cannot be found or executed"
+     print_v e "Either install $MAIL or disable sending mail"
      _ret=1
    fi
 
@@ -403,8 +409,9 @@ while IFS=',' read -r INSTANCE SIZE; do
   fi
 done < <($INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT")
 print_v i "Success: All $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
-$MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
-
+if [[ $SEND_MAIL == 1 ]]; then
+  $MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
+fi
 #need to have ssh key-pair setup to get rsync-via-ssh to be enabled, note trailing / is very important
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT/ backup_user@backup_server.example.com:~/server2/$OBJECT/
 #rsync -n -i -e ssh  -av  /srv/backups/$OBJECT backup_user@backup_server.example.com:~/server2/
