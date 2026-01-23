@@ -91,7 +91,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "vdhnl:" opt; do
+while getopts "vdhmnl:" opt; do
   case "${opt}" in
   d)
     DEBUG=1
@@ -391,6 +391,9 @@ while IFS=',' read -r INSTANCE SIZE; do
       if ! mkdir -p "$ROOT_DIR/$INSTANCE.0"; then
         print_v f "Creating directory failed: $HOSTNAME"
         restore_incus_backups_dir
+        if [[ $SEND_MAIL == 1 ]]; then
+          $MAIL -s "FAIL: $HOSTNAME incus export ceating $ROOT_DIR for $INSTANCE" "$ADMIN" < "$LOG_FILE"
+        fi
         exit 1
       fi
     fi
@@ -402,6 +405,9 @@ while IFS=',' read -r INSTANCE SIZE; do
     else
       print_v e "FAIL: The export of $INSTANCE failed" | tee -a "$LOG_FILE"
       print_v d "Restoring incus backup dir"
+      if [[ $SEND_MAIL == 1 ]]; then
+        $MAIL -s "FAIL: $HOSTNAME incus export $INSTANCE" "$ADMIN" < "$LOG_FILE"
+      fi
       restore_incus_backups_dir
       exit 1
     fi
