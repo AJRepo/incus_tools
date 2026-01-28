@@ -71,6 +71,9 @@ function print_v() {
   esac
 }
 
+#Start and initialize log file
+print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LOG_FILE"
+
 function print_usage() {
   cat <<EOM
   $0 version $VERSION - Afan Ottenheimer
@@ -263,7 +266,11 @@ if [[ $DEBUG == 1 ]]; then
 fi
 
 if inside_screen; then
-  print_v d "Running in a screen session."
+  print_v d "Running in a screen session: '$STY'"
+  print_v i "Screen Name = '$STY'" | tee -a "$LOG_FILE"
+  if [[ $SEND_MAIL == 1 ]]; then
+    $MAIL -s "Starting Incus backup: $HOSTNAME screen: $STY" "$ADMIN" < "$LOG_FILE"
+  fi
 else
   if tty -s; then
     print_v w "Interactive shell and not running in a screen session! Could be a problem if diconnected."
@@ -322,7 +329,6 @@ else
   fi
 fi
 
-print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LOG_FILE"
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
