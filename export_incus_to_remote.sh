@@ -329,6 +329,8 @@ else
   fi
 fi
 
+SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
+print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING" >> "$LOG_FILE"
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
@@ -421,6 +423,10 @@ while IFS=',' read -r INSTANCE SIZE; do
   fi
 done < <($INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT")
 print_v i "Success: All $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
+SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
+print_v d "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING"
+print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING" >> "$LOG_FILE"
+
 if [[ $SEND_MAIL == 1 ]]; then
   $MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
 fi
