@@ -1,7 +1,7 @@
 #!/bin/bash
 # vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
 
-VERSION="1.0.1"
+VERSION="2.0.0"
 
 # Fail if one process fails in a pipe
 set -o pipefail
@@ -9,11 +9,15 @@ set -o pipefail
 #Executables
 INCUS="/usr/bin/incus"
 MAIL="/usr/bin/mail"
+
+#INCUS DEFAULTS
+INCUS_CORE="/var/lib/incus"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 
 #Default Variables (see .env file for overrrides)
 DRY_RUN=''
 SEND_MAIL=''
+INCUS_FULL=0
 #How many full exports (e.g. backups) to keep
 EXPORTS_TO_KEEP=2
 #Remote Backup Method: (nfs only now, rsync over ssh later)
@@ -80,10 +84,11 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-m] [-n] [-v] [-l incus_list ]
+     $0 [-h] [-d] [-F] [-m] [-n] [-v] [-l incus_list ]
 
      Options:
         -h                help
+        -F                Backup $INCUS_CORE too (see variable \$INCUS_CORE)
         -d                debug
         -n                dry run (do not export or iterate backups)
         -v                pass '--verbose' to incus export command
@@ -94,8 +99,11 @@ function print_usage() {
 EOM
 }
 
-while getopts "vdhmnl:" opt; do
+while getopts "Fvdhmnl:" opt; do
   case "${opt}" in
+  F)
+    INCUS_FULL=1
+    ;;
   d)
     DEBUG=1
     INCUS_ARGS+=(--verbose)
@@ -246,9 +254,22 @@ function restore_incus_backups_dir() {
   fi
   # Restoring old link or dir for incus
   if [ ! -e $INCUS_DEFAULT_BACKUP_DIR ]; then
-    print_v d "Restoring /var/lib/incus/backups.bak to $INCUS_DEFAULT_BACKUP_DIR"
-    mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
+    print_v d "Restoring $INCUS_CORE/backups.bak to $INCUS_DEFAULT_BACKUP_DIR"
+    mv "$INCUS_CORE/backups.bak" $INCUS_DEFAULT_BACKUP_DIR
   fi
+}
+
+function backup_incus_core() {
+  print_v d "Backing up $INCUS_CORE to $ROOT_DIR"
+  if ! tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" $INCUS_CORE; then
+    print_v w "Failed to backup full incus $INCUS_CORE. Continuing"
+    $MAIL $ADMIN -s "$HOSTNAME: Attempt to backup $INCUS_CORE failed" < "$LOG_FILE"
+    return 2
+  else
+    mv "$ROOT_DIR/var_lib_incus.tmp.tgz" "$ROOT_DIR/var_lib_incus.tgz"
+    print_v d "Success: Backed up $INCUS_CORE (excluding $INCUS_CORE/backups) to $ROOT_DIR"
+  fi
+  return 0
 }
 
 #Check if dependencies are ok
@@ -300,10 +321,10 @@ if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
 fi
 
 #move incus directory or softlink to backup location
-if [ ! -e /var/lib/incus/backups.bak ] && mv $INCUS_DEFAULT_BACKUP_DIR /var/lib/incus/backups.bak; then
+if [ ! -e $INCUS_CORE/backups.bak ] && mv $INCUS_DEFAULT_BACKUP_DIR $INCUS_CORE/backups.bak; then
   print_v d "move of backups dir $INCUS_DEFAULT_BACKUP_DIR link ok"
 else
-  print_v f "failure in moving backups dir to /var/lib/incus/backups.bak"
+  print_v f "failure in moving backups dir to $INCUS_CORE/backups.bak"
   exit 1
 fi
 
@@ -321,16 +342,17 @@ else
     print_v f "Something is wrong. Expected softlink for $INCUS_DEFAULT_BACKUP_DIR"
     exit 1
   fi
-  if [ -e /var/lib/incus/backups.bak ]; then
-    mv /var/lib/incus/backups.bak $INCUS_DEFAULT_BACKUP_DIR
+  if [ -e $INCUS_CORE/backups.bak ]; then
+    mv $INCUS_CORE/backups.bak $INCUS_DEFAULT_BACKUP_DIR
   else
-    print_v f "Can't move /var/lib/incus/backups.bak back to $INCUS_DEFAULT_BACKUP_DIR"
+    print_v f "Can't move $INCUS_CORE/backups.bak back to $INCUS_DEFAULT_BACKUP_DIR"
     exit 1
   fi
 fi
 
 SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
-print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING" >> "$LOG_FILE"
+SPACE_REMAINING_PRETTY=$(df --output=avail -h $BACKUP_LOCAL_ROOT_DIR | tail -1)
+print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING_PRETTY" >> "$LOG_FILE"
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
@@ -344,8 +366,17 @@ TERM=$((EXPORTS_TO_KEEP+1))
 if [ ! -d "$ROOT_DIR" ]; then
   if ! mkdir -p "$ROOT_DIR"; then
     print_v f "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
-    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $REMOTE_SERVER failed" < /etc/cron.d/backups
+    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $REMOTE_SERVER failed" < "$LOG_FILE"
     exit 1
+  fi
+fi
+
+#Incus Full Backup to include Incus core directory
+if [[ "$INCUS_FULL" == 1 ]]; then
+  if [[ $DRY_RUN -eq 1 ]]; then
+    print_v i "-F called but also -n, Dry Run: Not backing up $INCUS_CORE"
+  else
+    backup_incus_core
   fi
 fi
 
@@ -424,8 +455,9 @@ while IFS=',' read -r INSTANCE SIZE; do
 done < <($INCUS list "$INCUS_LIST" -c nD --format="$LIST_FORMAT")
 print_v i "Success: All $HOSTNAME exports done" "$ADMIN" | tee -a "$LOG_FILE"
 SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
+SPACE_REMAINING_PRETTY=$(df --output=avail -h $BACKUP_LOCAL_ROOT_DIR | tail -1)
 print_v d "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING"
-print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING" >> "$LOG_FILE"
+print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING_PRETTY" >> "$LOG_FILE"
 
 if [[ $SEND_MAIL == 1 ]]; then
   $MAIL -s "Success: All $HOSTNAME exports done" "$ADMIN" < "$LOG_FILE"
