@@ -2,13 +2,19 @@
 
 Why this script?
 
-* Because "incus export" is an API client call to the server. Thus the API call creates a duplication of the export file as incus creates, copies, then deletes the file.
+* Because "incus export" is an API client call to the server. EVEN IF CALLED ON the server
+  Thus "incus export," if you specify any location to save the export, will create a duplicate
+  of the export file. I.e. `incus export` creates, copies, then deletes the file.
 
-If you can have the "backup directory" already be the remote loction then the copy/delete step (e.g. mv) can be nearly instantaneous.
+* If you can have the "backup directory" already be the remote loction that understands inode cp then the
+  copy/delete step is nearly instantaneous (e.g. NFS).
 
-* For security (or other) purposes you might want your backup directory to be OFFline except when running a backup/export.
+* For security (or other) purposes, you might want your backup directory to be OFFline except when running a backup/export.
 
-This script
+This script can backup both your /var/lib/incus directory (if you select the -F flag) and export instances.
+By default it will backup all running instances. You can override this to specify any filter applicable to `incus list`
+
+If backing up instances, this script does the following:
 
 1. Moves /var/lib/incus/backup to /var/lib/incus/backup.bak
 
@@ -24,15 +30,20 @@ This script
 
 1. Moves /var/lib/incus/backup.bak back to /var/lib/incus/backup
 
+
 Currently, this remote location is an NFS mount. Future work will allow it to be anything.
 
 Quick Start:
 
-1) Use the "-n" flag for a dry run. Use the "-d" flag for debug messages
+1. Copy the file `export_incus_to_remote.env.dist` to `export_incus_to_remote.env` and update it.
 
-2) Copy the file export\_incus\_to\_remote.env.dist to export\_incus\_to\_remote.env with your info
+1. Run `export_incus_to_remote.env.sh -F -n -d` to see what it would do before it actually does a backup.
 
-3) Run `export_incus_to_remote.env.sh -n -d` to see what it would do before it actually does a backup.
+1. If all looks ok Run `export_incus_to_remote.env.sh -F -d` 
+
+The "-n" flag = dry run. The "-d" flag = debug messages
+
+
 
 ---
 
