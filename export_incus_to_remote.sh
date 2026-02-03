@@ -80,7 +80,7 @@ print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LO
 
 function print_usage() {
   cat <<EOM
-  $0 version $VERSION - Afan Ottenheimer
+  $0 version $VERSION - Afan Ottenheimer (https://github.com/AJRepo/incus_tools)
 
   Usage:
 
@@ -261,11 +261,22 @@ function restore_incus_backups_dir() {
 
 function backup_incus_core() {
   print_v d "Backing up $INCUS_CORE to $ROOT_DIR"
-  if ! tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" $INCUS_CORE; then
-    print_v w "Failed to backup full incus $INCUS_CORE. Continuing"
-    $MAIL $ADMIN -s "$HOSTNAME: Attempt to backup $INCUS_CORE failed" < "$LOG_FILE"
-    return 2
+  if [ -f /etc/subuid ]; then
+    BACKUP_CORE_FILES=(/etc/subuid /etc/subgid "$INCUS_CORE")
   else
+    BACKUP_CORE_FILES=("$INCUS_CORE")
+  fi
+  print_v d "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
+  print_v i "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" > "$LOG_FILE"
+  tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
+  TAR_EXIT=$?
+  if [[ $TAR_EXIT != 0 ]]; then
+    #tar can return 1 if some files change while being backed up.
+    print_v w "Tar exited with value $TAR_EXIT on backup full incus $INCUS_CORE. Continuing"
+    $MAIL $ADMIN -s "$HOSTNAME: Attempt to tar $INCUS_CORE non-zero status" < "$LOG_FILE"
+  fi
+  if [ -f "$ROOT_DIR/var_lib_incus.tmp.tgz" ]; then
+    #mv tmp file to overwrite last backup
     mv "$ROOT_DIR/var_lib_incus.tmp.tgz" "$ROOT_DIR/var_lib_incus.tgz"
     print_v d "Success: Backed up $INCUS_CORE (excluding $INCUS_CORE/backups) to $ROOT_DIR"
   fi
@@ -406,7 +417,7 @@ while IFS=',' read -r INSTANCE SIZE; do
   if [[ $DRY_RUN -eq 1 ]]; then
     print_v v "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
   else
-    #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc. 
+    #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc.
     for i in $(seq $EXPORTS_TO_KEEP -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
         NEXT=$((i+1))
