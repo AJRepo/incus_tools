@@ -88,11 +88,13 @@ function print_usage() {
 
      Options:
         -h                help
-        -F                Backup $INCUS_CORE too (see variable \$INCUS_CORE)
         -d                debug
+        -F                Backup $INCUS_CORE (see variable \$INCUS_CORE)
+        -l <incus_list>   list of items to export. Defaults to 'state=running'
+                          note: If you only want to backup /var/lib/incus and not 
+                          any containers use '-F -l state=none'
         -n                dry run (do not export or iterate backups)
         -v                pass '--verbose' to incus export command
-        -l                items to export. Defaults to 'state=running'
     Version Requirements:
       incus >= 6.19 (if using the check size before export functionality)
 
@@ -273,7 +275,7 @@ function backup_incus_core() {
   if [[ $TAR_EXIT != 0 ]]; then
     #tar can return 1 if some files change while being backed up.
     print_v w "Tar exited with value $TAR_EXIT on backup full incus $INCUS_CORE. Continuing"
-    $MAIL $ADMIN -s "$HOSTNAME: Attempt to tar $INCUS_CORE non-zero status" < "$LOG_FILE"
+    $MAIL $ADMIN -s "$HOSTNAME: Attempt to tar $INCUS_CORE non-zero status $TAR_EXIT" < "$LOG_FILE"
   fi
   if [ -f "$ROOT_DIR/var_lib_incus.tmp.tgz" ]; then
     #mv tmp file to overwrite last backup
