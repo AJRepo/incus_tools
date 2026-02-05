@@ -275,12 +275,12 @@ function backup_incus_core() {
   fi
   print_v d "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
   print_v i "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" > "$LOG_FILE"
-  tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
+  tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" 2> /tmp/tar_error.log
   TAR_EXIT=$?
   if [[ $TAR_EXIT != 0 ]]; then
     #tar can return 1 if some files change while being backed up.
     print_v w "Tar exited with value $TAR_EXIT on backup full incus $INCUS_CORE. Continuing"
-    $MAIL $ADMIN -s "$HOSTNAME: Attempt to tar $INCUS_CORE non-zero status $TAR_EXIT" < "$LOG_FILE"
+    $MAIL $ADMIN -s "$HOSTNAME: tar $INCUS_CORE had non-zero status $TAR_EXIT" < /tmp/tar_error.log
   fi
   if [ -f "$ROOT_DIR/var_lib_incus.tmp.tgz" ]; then
     #mv tmp file to overwrite last backup
