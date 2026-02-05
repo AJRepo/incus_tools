@@ -13,6 +13,7 @@ MAIL="/usr/bin/mail"
 #INCUS DEFAULTS
 INCUS_CORE="/var/lib/incus"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
+PROMPT_FOR_CONF=0
 
 #Default Variables (see .env file for overrrides)
 DRY_RUN=''
@@ -94,6 +95,7 @@ function print_usage() {
                           note: If you only want to backup /var/lib/incus and not 
                           any containers use '-F -l state=none'
         -n                dry run (do not export or iterate backups)
+        -p                Pause between steps for a prompt by a human
         -v                pass '--verbose' to incus export command
     Version Requirements:
       incus >= 6.19 (if using the check size before export functionality)
@@ -101,7 +103,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "Fvdhmnl:" opt; do
+while getopts "Fdhmnlpv:" opt; do
   case "${opt}" in
   F)
     INCUS_FULL=1
@@ -122,6 +124,9 @@ while getopts "Fvdhmnl:" opt; do
     ;;
   n)
     DRY_RUN=1
+    ;;
+  p)
+    PROMPT_FOR_CONF=1
     ;;
   v)
     INCUS_ARGS+=(--verbose)
@@ -323,6 +328,9 @@ fi
 #check to make sure this is a network mounted location
 if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
   print_v d "Not a mountpoint, mounting" | tee -a "$LOG_FILE"
+  if [[ $PROMPT_FOR_CONF == 1 ]]; then
+    read -rp "Pausing: Press Ctrl-C to stop. Enter to continue."
+  fi
   mount -t nfs4 "$REMOTE_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
 fi
 
@@ -341,7 +349,9 @@ else
   exit 1
 fi
 
-#read -rp "move done: Pausing for human checks"
+if [[ $PROMPT_FOR_CONF == 1 ]]; then
+  read -rp "Pausing after 'mv backups backups.bak' : Press Ctrl-C to stop. If you stop, move that dir back"
+fi
 
 if ln -s $BACKUP_LOCAL_TEMP_DIR $INCUS_DEFAULT_BACKUP_DIR; then
   print_v d "softlink creation ok"
@@ -366,11 +376,11 @@ fi
 SPACE_REMAINING=$(df --output=avail -B1 $BACKUP_LOCAL_ROOT_DIR | tail -1)
 SPACE_REMAINING_PRETTY=$(df --output=avail -h $BACKUP_LOCAL_ROOT_DIR | tail -1)
 print_v i "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING_PRETTY" >> "$LOG_FILE"
+print_v d "Space remaining on $BACKUP_LOCAL_ROOT_DIR: $SPACE_REMAINING_PRETTY"
 
 ROOT_DIR="$BACKUP_LOCAL_ROOT_DIR/$HOSTNAME".incus_export
 
 TERM=$((EXPORTS_TO_KEEP+1))
-
 
 #print_v e $ROOT_DIR
 #exit
@@ -384,6 +394,10 @@ if [ ! -d "$ROOT_DIR" ]; then
   fi
 fi
 
+if [[ $PROMPT_FOR_CONF == 1 ]]; then
+  read -rp "Pausing before exports and core backup. Press Ctrl-C to stop."
+fi
+
 #Incus Full Backup to include Incus core directory
 if [[ "$INCUS_FULL" == 1 ]]; then
   if [[ $DRY_RUN -eq 1 ]]; then
@@ -391,6 +405,10 @@ if [[ "$INCUS_FULL" == 1 ]]; then
   else
     backup_incus_core
   fi
+fi
+
+if [[ $PROMPT_FOR_CONF == 1 ]]; then
+  read -rp "Core backup done. Pausing before exports. Press Ctrl-C to stop."
 fi
 
 #$MAIL $ADMIN -s "backup starting" < /etc/cron.d/backups
