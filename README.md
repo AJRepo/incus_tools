@@ -16,11 +16,11 @@ By default it will backup all running instances. You can override this to specif
 
 If backing up instances, this script does the following:
 
-1. Moves /var/lib/incus/backup to /var/lib/incus/backup.bak
+1. Moves /var/lib/incus/backups to /var/lib/incus/backups.bak
 
 1. Mounts (if not already mounted) your remote backup location
 
-1. Links /var/lib/incus/backup to the remote backup location
+1. Links /var/lib/incus/backups to the remote backup location
 
 1. Does the export
 
@@ -28,8 +28,7 @@ If backing up instances, this script does the following:
 
 1. Unmounts the remote backup location (to be a flag option in the future)
 
-1. Moves /var/lib/incus/backup.bak back to /var/lib/incus/backup
-
+1. Moves /var/lib/incus/backups.bak back to /var/lib/incus/backups
 
 Currently, this remote location is an NFS mount. Future work will allow it to be anything.
 
