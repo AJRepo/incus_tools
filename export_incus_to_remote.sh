@@ -85,18 +85,36 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-F] [-m] [-n] [-v] [-l incus_list ]
+     $0 [-h] [-d] [-F] [-m] [-t mount_type] [-n] [-v] [-l incus_list ]
 
      Options:
         -h                help
+
         -d                debug
-        -F                Backup $INCUS_CORE (see variable \$INCUS_CORE)
+
+        -F                Backup the directory $INCUS_CORE (see variable \$INCUS_CORE)
+
         -l <incus_list>   list of items to export. Defaults to 'state=running'
-                          note: If you only want to backup /var/lib/incus and not 
+                          note: If you only want to backup /var/lib/incus and not
                           any containers use '-F -l state=none'
+
+
+        -m                Send email reports
+
         -n                dry run (do not export or iterate backups)
-        -p                Pause between steps for a prompt by a human
+
+        -p                Pause between steps for a prompt or Ctrl-C
+
         -v                pass '--verbose' to incus export command
+
+       Options soon to be released:
+
+        -t <mount_type>   mount_type can be nfs, fstab, or none
+                          nfs = "mount -t nfs4 ...." and unmount afterwards
+                          fstab = "mount \$BACKUP_LOCAL_ROOT_DIR" (Default = $BACKUP_LOCAL_ROOT_DIR)
+                          none = Do no mounting or unmounting. Use \$BACKUP_LOCAL_ROOT_DIR:$BACKUP_LOCAL_ROOT_DIR
+
+
     Version Requirements:
       incus >= 6.19 (if using the check size before export functionality)
 
@@ -274,7 +292,7 @@ function backup_incus_core() {
     BACKUP_CORE_FILES=("$INCUS_CORE")
   fi
   print_v d "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
-  print_v i "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" > "$LOG_FILE"
+  print_v i "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" >> "$LOG_FILE"
   tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" 2> /tmp/tar_error.log
   TAR_EXIT=$?
   if [[ $TAR_EXIT != 0 ]]; then
