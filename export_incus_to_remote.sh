@@ -89,7 +89,7 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-F] [-m] [-t mount_type] [-n] [-v] [-l incus_list ]
+     $0 [-h] [-d] [-F] [-m] [-t mount_type] [-n] [-N number] [-v] [-l incus_list ]
 
      Options:
         -h                help
@@ -106,6 +106,8 @@ function print_usage() {
         -m                Send email reports
 
         -n                dry run (do not export or iterate backups)
+
+        -N <number>       Numbered exports to keep (2 means keeping exports 0, 1, 2) (e.g. 3)
 
         -p                Pause between steps for a prompt or Ctrl-C
 
@@ -127,7 +129,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "Fdhmnlpt:v:" opt; do
+while getopts "FdhmnlpN:t:v:" opt; do
   case "${opt}" in
   F)
     INCUS_FULL=1
@@ -148,6 +150,9 @@ while getopts "Fdhmnlpt:v:" opt; do
     ;;
   n)
     DRY_RUN=1
+    ;;
+  N)
+    EXPORTS_TO_KEEP=${OPTARG}
     ;;
   t)
     MOUNT_TYPE=${OPTARG}
@@ -264,6 +269,13 @@ function dependencies_check() {
   if [[ "$BACKUP_LOCAL_TEMP_DIR" == "$INCUS_DEFAULT_BACKUP_DIR" ]]; then
     print_v w "Warning: Tmp=$BACKUP_LOCAL_TEMP_DIR and DEFAULT=$INCUS_DEFAULT_BACKUP_DIR. Untested feature." | tee -a "$LOG_FILE"
     print_v w "Temp backup dir the same as the defualt backup dir could interfere with future backups."
+  fi
+
+  if [[ "$EXPORTS_TO_KEEP" =~ ^[0-9]+$ ]]; then
+    print_v d "EXPORTS_TO_KEEP: $EXPORTS_TO_KEEP is an ok integer"
+  else
+    print_v d "EXPORTS_TO_KEEP: $EXPORTS_TO_KEEP is not an integer greater than or equal to 0"
+    _ret=2
   fi
 
 
@@ -488,7 +500,7 @@ while IFS=',' read -r INSTANCE SIZE; do
     print_v d "Not running '$INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}" "'"
   else
     #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc.
-    for i in $(seq $EXPORTS_TO_KEEP -1 0); do
+    for i in $(seq "$EXPORTS_TO_KEEP" -1 0); do
       if [ -d "$ROOT_DIR/$INSTANCE.$i" ]; then
         NEXT=$((i+1))
         PREVIOUS=$((i-1))
