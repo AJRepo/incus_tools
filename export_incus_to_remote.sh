@@ -1,7 +1,7 @@
 #!/bin/bash
 # vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
 
-VERSION="2.0.0"
+VERSION="2.0.1"
 
 # Fail if one process fails in a pipe
 set -o pipefail
@@ -10,10 +10,14 @@ set -o pipefail
 INCUS="/usr/bin/incus"
 MAIL="/usr/bin/mail"
 
-#INCUS DEFAULTS
+INCUS_VERSION=$(incus_version)
+
+#PROGRAM DEFAULTS
 INCUS_CORE="/var/lib/incus"
 INCUS_DEFAULT_BACKUP_DIR="/var/lib/incus/backups"
 PROMPT_FOR_CONF=0
+MOUNT_TYPE='none'
+MOUNT_TYPE='nfs'
 
 #Default Variables (see .env file for overrrides)
 DRY_RUN=''
@@ -77,7 +81,7 @@ function print_v() {
 }
 
 #Start and initialize log file
-print_v i "Starting Incus Exports $(date) using backup version $VERSION"  > "$LOG_FILE"
+print_v i "Starting Incus Exports $(date) using backup version $VERSION, incus version $INCUS_VERSION"  > "$LOG_FILE"
 
 function print_usage() {
   cat <<EOM
@@ -109,7 +113,9 @@ function print_usage() {
 
        Options soon to be released:
 
-        -t <mount_type>   mount_type can be nfs, fstab, or none
+        -t <mount_type>   mount_type to be nfs, cifs, ext4, fstab, etc. or none (defaults to 'none')
+                          Currently supported: nfs, none
+
                           nfs = "mount -t nfs4 ...." and unmount afterwards
                           fstab = "mount \$BACKUP_LOCAL_ROOT_DIR" (Default = $BACKUP_LOCAL_ROOT_DIR)
                           none = Do no mounting or unmounting. Use \$BACKUP_LOCAL_ROOT_DIR:$BACKUP_LOCAL_ROOT_DIR
@@ -121,7 +127,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "Fdhmnlpv:" opt; do
+while getopts "Fdhmnlpt:v:" opt; do
   case "${opt}" in
   F)
     INCUS_FULL=1
@@ -143,6 +149,9 @@ while getopts "Fdhmnlpv:" opt; do
   n)
     DRY_RUN=1
     ;;
+  t)
+    MOUNT_TYPE=${OPTARG}
+    ;;
   p)
     PROMPT_FOR_CONF=1
     ;;
@@ -151,6 +160,26 @@ while getopts "Fdhmnlpv:" opt; do
     ;;
   esac
 done
+
+function mount_backup_location {
+  local this_mount_type=$1
+  #check to make sure this is a mounted location
+  if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
+    print_v d "Not a mountpoint, mounting of type $this_mount_type" | tee -a "$LOG_FILE"
+    if [[ $PROMPT_FOR_CONF == 1 ]]; then
+      read -rp "Pausing: About to mount $this_mount_type mount. Press Ctrl-C to stop. Enter to continue."
+    fi
+    #TODO: add differnt mount types
+    mount -t nfs4 "$REMOTE_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
+  fi
+
+  #did that mount succeed? One more test.
+  if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
+    print_v f  "FAIL: $HOSTNAME: $this_mount_type connect to $REMOTE_SERVER failed"| tee -a "$LOG_FILE"
+    $MAIL $ADMIN -s "FAIL: $HOSTNAME: $this_mount_type connect to $REMOTE_SERVER failed"  < "$LOG_FILE"
+    exit 1
+  fi
+}
 
 # return 0 if program version is equal or greater than check version
 function check_version()
@@ -212,6 +241,10 @@ function dependencies_check() {
      print_v d "Detected incus version '$version'. Incus>=6.19 supports checking for backup disk space."
      SUPPORTS_DISK_CHECK=1
      LIST_FORMAT="csv,raw"
+   elif check_version "$version" '6.22'; then
+     print_v d "Detected incus version '$version'. Incus>=6.22 supports direct backups without copying."
+     SUPPORTS_DISK_CHECK=1
+     LIST_FORMAT="csv,raw"
    else
      print_v e "Detected incus version '$version'. Please use incus 6.19 or later to check backup disk space."
      SUPPORTS_DISK_CHECK=0
@@ -223,8 +256,14 @@ function dependencies_check() {
   fi
 
   if [[ $REMOTE_SERVER == "ip.x.x.x" ]]; then
-    print_v e "REMOTE_SERVER is not set. See .env file and set variables"
+    print_v e "REMOTE_SERVER is not set. See .env file and set variables. Exiting."
     _ret=2
+  fi
+
+  #Warn if temp and default are the same thing
+  if [[ "$BACKUP_LOCAL_TEMP_DIR" == "$INCUS_DEFAULT_BACKUP_DIR" ]]; then
+    print_v w "Warning: Tmp=$BACKUP_LOCAL_TEMP_DIR and DEFAULT=$INCUS_DEFAULT_BACKUP_DIR. Untested feature." | tee -a "$LOG_FILE"
+    print_v w "Temp backup dir the same as the defualt backup dir could interfere with future backups."
   fi
 
 
@@ -257,7 +296,7 @@ function is_incus_export_running() {
 }
 
 function restore_incus_backups_dir() {
-  #at end of this unmount NFS dir and set all back
+  #at end of this unmount MOUNT_TYPE dir and set all back
   if is_incus_export_running; then  #return 0 (yes) if it is still running
     print_v w "Export still running? It shouldn't be at this point."
     sleep 5
@@ -269,7 +308,7 @@ function restore_incus_backups_dir() {
   else
     print_v d "Incus Export completed. Moving forward"
   fi
-  # remove link to backup NFS dir
+  # remove link to backup MOUNT_TYPE dir
   if [ -L $INCUS_DEFAULT_BACKUP_DIR ]; then
     print_v d "$INCUS_DEFAULT_BACKUP_DIR is a softlink. Removing softlink"
     rm $INCUS_DEFAULT_BACKUP_DIR;
@@ -311,7 +350,7 @@ function backup_incus_core() {
 #Check if dependencies are ok
 if ! dependencies_check; then
   print_v f "Some Dependency Checks failed. See above messages for more info."
-  exit 3
+  exit 4
 fi
 
 if [[ $DEBUG == 1 ]]; then
@@ -343,20 +382,11 @@ else
   print_v d "No other export is running."
 fi
 
-#check to make sure this is a network mounted location
-if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
-  print_v d "Not a mountpoint, mounting" | tee -a "$LOG_FILE"
-  if [[ $PROMPT_FOR_CONF == 1 ]]; then
-    read -rp "Pausing: Press Ctrl-C to stop. Enter to continue."
-  fi
-  mount -t nfs4 "$REMOTE_SERVER:$NFS_REMOTE_ROOT_DIR" $BACKUP_LOCAL_ROOT_DIR
-fi
-
-#did that mount succeed? One more test.
-if ! mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
-  print_v f  "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"| tee -a "$LOG_FILE"
-  $MAIL $ADMIN -s "FAIL: $HOSTNAME: NFS connect to $REMOTE_SERVER failed"  < "$LOG_FILE"
-  exit 1
+print_v d "MOUNT_TYPE=$MOUNT_TYPE"
+if [[ $MOUNT_TYPE != 'none' ]]; then
+  mount_backup_location "$MOUNT_TYPE"
+else
+  print_v d "Not backing up to a mounted location, skipping mounting checks" | tee -a "$LOG_FILE"
 fi
 
 #move incus directory or softlink to backup location
@@ -407,7 +437,7 @@ TERM=$((EXPORTS_TO_KEEP+1))
 if [ ! -d "$ROOT_DIR" ]; then
   if ! mkdir -p "$ROOT_DIR"; then
     print_v f "FAIL: Creation of $ROOT_DIR failed" | tee -a "$LOG_FILE"
-    $MAIL $ADMIN -s "$HOSTNAME: NFS connect to $REMOTE_SERVER failed" < "$LOG_FILE"
+    $MAIL $ADMIN -s "FAIL: $HOSTNAME: Creation of $ROOT_DIR failed" < "$LOG_FILE"
     exit 1
   fi
 fi
@@ -443,8 +473,9 @@ while IFS=',' read -r INSTANCE SIZE; do
     #Set a buffer of 10 Gigs
     BUFFER=10000000
     AVAIL=$((SPACE_REMAINING - BUFFER - SIZE))
+    print_v d "Calcualted AVAIL=($AVAIL = $SPACE_REMAINING - $BUFFER - $SIZE) "
     if [ $AVAIL -lt 0 ]; then
-      print_v f "Can't back up because remaining-buffer-size ($AVAIL) is less than 0 for instance of size=$SIZE"
+      print_v f "Can't back up because remaining-buffer-size ($AVAIL) is less than 0 for instance of size=$SIZE" | tee -a "$LOG_FILE"
       exit 1
     else
       print_v d "Disk check: Sufficient space on $BACKUP_LOCAL_ROOT_DIR ($SPACE_REMAINING) for $INSTANCE ($SIZE)"
@@ -454,6 +485,7 @@ while IFS=',' read -r INSTANCE SIZE; do
   fi
   if [[ $DRY_RUN -eq 1 ]]; then
     print_v v "Dry run called: Not doing anything with $INSTANCE of size $SIZE"
+    print_v d "Not running '$INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}" "'"
   else
     #Iterate Backup Dir. mv name.2 to name.3 and name.1 to name.2, etc.
     for i in $(seq $EXPORTS_TO_KEEP -1 0); do
@@ -488,7 +520,13 @@ while IFS=',' read -r INSTANCE SIZE; do
 
     print_v i "Exporting $INSTANCE to $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz"  | tee -a "$LOG_FILE"
     print_v i "Command: $INCUS export $INSTANCE $ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}"
-    if $INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}"; then
+
+    export_output=$($INCUS export "$INSTANCE" "$ROOT_DIR/$INSTANCE.0/$INSTANCE.tgz" "${INCUS_ARGS[@]}")
+    export_status=$?
+
+    printf "%s\n" "$export_output" | tee -a "$LOG_FILE"
+
+    if [ $export_status -eq 0 ];  then
       print_v i "Success Exporting $INSTANCE" | tee -a "$LOG_FILE"
     else
       print_v e "FAIL: The export of $INSTANCE failed" | tee -a "$LOG_FILE"
@@ -517,7 +555,12 @@ fi
 
 restore_incus_backups_dir
 
-umount "$BACKUP_LOCAL_ROOT_DIR"
+if [[ $MOUNT_TYPE != 'none' ]] && mountpoint -q $BACKUP_LOCAL_ROOT_DIR; then
+  print_v d "Because MOUNT_TYPE=$MOUNT_TYPE: unmounting $BACKUP_LOCAL_ROOT_DIR"
+  umount "$BACKUP_LOCAL_ROOT_DIR"
+else
+  print_v d "Because MOUNT_TYPE=$MOUNT_TYPE: Not unmounting $BACKUP_LOCAL_ROOT_DIR"
+fi
 print_v d "Finished with exports"
 exit 0
 
