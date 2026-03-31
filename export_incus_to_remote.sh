@@ -247,8 +247,14 @@ function dependencies_check() {
      SUPPORTS_DISK_CHECK=1
      LIST_FORMAT="csv,raw"
    elif check_version "$version" '6.22'; then
-     print_v d "Detected incus version '$version'. Incus>=6.22 supports direct backups without copying."
+     print_v d "Detected incus version '$version'. Incus==6.22 has a bug for optimized-storage exports."
      SUPPORTS_DISK_CHECK=1
+     INCUS_ARGS=(--instance-only)
+     LIST_FORMAT="csv,raw"
+   elif check_version "$version" '6.23'; then
+     print_v d "Detected incus version '$version'. Incus==6.23 has a bug for optimized-storage exports."
+     SUPPORTS_DISK_CHECK=1
+     INCUS_ARGS=(--instance-only)
      LIST_FORMAT="csv,raw"
    else
      print_v e "Detected incus version '$version'. Please use incus 6.19 or later to check backup disk space."
