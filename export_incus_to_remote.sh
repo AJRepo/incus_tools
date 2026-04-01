@@ -10,6 +10,9 @@ set -o pipefail
 INCUS="/usr/bin/incus"
 MAIL="/usr/bin/mail"
 
+function incus_version() {
+  $INCUS version | awk '/Server version: / { print $3}'
+}
 INCUS_VERSION=$(incus_version)
 
 #PROGRAM DEFAULTS
@@ -129,7 +132,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "FdhmnlpN:t:v:" opt; do
+while getopts "Fdhmnl:pN:t:v:" opt; do
   case "${opt}" in
   F)
     INCUS_FULL=1
@@ -144,6 +147,10 @@ while getopts "FdhmnlpN:t:v:" opt; do
     ;;
   l)
     INCUS_LIST=${OPTARG}
+    if [[ $INCUS_LIST == "" ]]; then
+      print_v e "INCUS_LIST is blank"
+      exit 1
+    fi
     ;;
   m)
     SEND_MAIL=1
@@ -197,9 +204,6 @@ function check_version()
     return 1
 }
 
-function incus_version() {
-  $INCUS version | awk '/Server version: / { print $3}'
-}
 
 # function: inside_screen. Tests to see if we are in a screen.
 # We can't rely on $STY because sudo strips variables.
@@ -374,6 +378,7 @@ fi
 if [[ $DEBUG == 1 ]]; then
   print_v d "Dependencies Check passed:"
   print_v d "  ADMIN=$ADMIN"
+  print_v d "  DRY_RUN=$DRY_RUN"
   print_v d "  REMOTE_SERVER=$REMOTE_SERVER"
   print_v d "  Local Mountpoint: BACKUP_LOCAL_ROOT_DIR=$BACKUP_LOCAL_ROOT_DIR"
   print_v d "  Remote Server: NFS_REMOTE_ROOT_DIR=$NFS_REMOTE_ROOT_DIR"
@@ -388,7 +393,8 @@ if inside_screen; then
 else
   if tty -s; then
     print_v w "Interactive shell and not running in a screen session! Could be a problem if diconnected."
-    print_v w "About to backup $INCUS_LIST"
+    print_v w "About to backup this list of Instances: '$INCUS_LIST'"
+    print_v w "  DRY_RUN=$DRY_RUN"
     read -rp "press enter key to continue. Press Ctrl-C to exit."
   fi
 fi
