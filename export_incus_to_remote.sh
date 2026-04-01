@@ -1,7 +1,7 @@
 #!/bin/bash
 # vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
 
-VERSION="2.0.1"
+VERSION="2.0.2"
 
 # Fail if one process fails in a pipe
 set -o pipefail
@@ -102,9 +102,10 @@ function print_usage() {
         -F                Backup the directory $INCUS_CORE (see variable \$INCUS_CORE)
 
         -l <incus_list>   list of items to export. Defaults to 'state=running'
-                          note: If you only want to backup /var/lib/incus and not
-                          any containers use '-F -l state=none'
 
+                          Examples:
+                          Backup /var/lib/incus and not containers: '-F -l state=none'
+                          Backup only container myContainer: -l name=myContainer
 
         -m                Send email reports
 
@@ -112,7 +113,7 @@ function print_usage() {
 
         -N <number>       Numbered exports to keep (2 means keeping exports 0, 1, 2) (e.g. 3)
 
-        -p                Pause between steps for a prompt or Ctrl-C
+        -p                Pause between steps for a prompt allowing a clean stop with Ctrl-C
 
         -v                pass '--verbose' to incus export command
 
