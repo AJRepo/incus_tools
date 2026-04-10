@@ -1,7 +1,7 @@
 #!/bin/bash
 # vim: tabstop=2 shiftwidth=2 expandtab softtabstop=2
 
-VERSION="2.0.2"
+VERSION="2.1.0"
 
 # Fail if one process fails in a pipe
 set -o pipefail
@@ -92,7 +92,7 @@ function print_usage() {
 
   Usage:
 
-     $0 [-h] [-d] [-F] [-m] [-t mount_type] [-n] [-N number] [-v] [-l incus_list ]
+     $0 [-h] [-d] [-F] [-m] [-t mount_type] [-n] [-N number] [-v] [-l incus_list ] [-p] [-q]
 
      Options:
         -h                help
@@ -115,6 +115,8 @@ function print_usage() {
 
         -p                Pause between steps for a prompt allowing a clean stop with Ctrl-C
 
+        -q                pass '--quiet' to incus export command (suppresses 'Exporting the backup: XGB (YMB/s)' messages
+
         -v                pass '--verbose' to incus export command
 
        Options soon to be released:
@@ -133,7 +135,7 @@ function print_usage() {
 EOM
 }
 
-while getopts "Fdhmnl:pN:t:v:" opt; do
+while getopts "Fdhmnl:pqN:t:v:" opt; do
   case "${opt}" in
   F)
     INCUS_FULL=1
@@ -167,6 +169,9 @@ while getopts "Fdhmnl:pN:t:v:" opt; do
     ;;
   p)
     PROMPT_FOR_CONF=1
+    ;;
+  q)
+    INCUS_ARGS+=(--quiet)
     ;;
   v)
     INCUS_ARGS+=(--verbose)
