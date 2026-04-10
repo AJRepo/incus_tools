@@ -115,7 +115,7 @@ function print_usage() {
 
         -p                Pause between steps for a prompt allowing a clean stop with Ctrl-C
 
-        -q                pass '--quiet' to incus export command (suppresses 'Exporting the backup: XGB (YMB/s)' messages
+        -q                pass '--quiet' to incus export command (suppresses 'Exporting the backup: XGB (YMB/s)' messages)
 
         -v                pass '--verbose' to incus export command
 
@@ -358,9 +358,10 @@ function backup_incus_core() {
   else
     BACKUP_CORE_FILES=("$INCUS_CORE")
   fi
-  print_v d "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
-  print_v i "Running: tar --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" >> "$LOG_FILE"
-  tar --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" 2> /tmp/tar_error.log
+  # adding --warning=no-file-ignored suppresses warnings about 'socket ignored' files
+  print_v d "Running: tar --warning=no-file-ignored --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}"
+  print_v i "Running: tar --warning=no-file-ignored --exclude $INCUS_CORE/backups -zcf $ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" >> "$LOG_FILE"
+  tar --warning=no-file-ignored --exclude "$INCUS_CORE/backups" -zcf "$ROOT_DIR/var_lib_incus.tmp.tgz" "${BACKUP_CORE_FILES[@]}" 2> /tmp/tar_error.log
   TAR_EXIT=$?
   if [[ $TAR_EXIT != 0 ]]; then
     #tar can return 1 if some files change while being backed up.
